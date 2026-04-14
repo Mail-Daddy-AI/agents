@@ -142,6 +142,7 @@ class AgentSessionOptions:
     ivr_detection: bool
     aec_warmup_duration: float | None
     session_close_transcript_timeout: float
+    clear_buffer_if_not_interrupted: bool
 
     @property
     def endpointing(self) -> EndpointingOptions:
@@ -229,6 +230,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         video_sampler: NotGivenOr[_VideoSampler | None] = NOT_GIVEN,
         preemptive_generation: bool = True,
         aec_warmup_duration: float | None = 3.0,
+        clear_buffer_if_not_interrupted: bool = False,
         ivr_detection: bool = False,
         user_away_timeout: float | None = 15.0,
         session_close_transcript_timeout: float = 2.0,
@@ -376,6 +378,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             else None,
             aec_warmup_duration=aec_warmup_duration,
             session_close_transcript_timeout=session_close_transcript_timeout,
+            clear_buffer_if_not_interrupted=clear_buffer_if_not_interrupted,
         )
         self._conn_options = conn_options or SessionConnectOptions()
         self._started = False

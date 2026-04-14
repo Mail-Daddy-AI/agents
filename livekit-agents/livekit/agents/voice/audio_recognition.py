@@ -569,9 +569,9 @@ class AudioRecognition:
         self._user_turn_committed = False
 
         # reset stt to clear the buffer from previous user turn
-        stt = self._stt
-        self.update_stt(None)
-        self.update_stt(stt)
+        # stt = self._stt
+        # self.update_stt(None)
+        # self.update_stt(stt)
 
     def commit_user_turn(
         self,

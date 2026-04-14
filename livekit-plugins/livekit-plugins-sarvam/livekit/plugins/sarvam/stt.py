@@ -767,6 +767,29 @@ class SpeechStream(stt.SpeechStream):
         )
         self._end_of_stream_msg = self._build_end_of_stream_message()
 
+        # Transcription pause flag
+        self._transcription_enabled: bool = True
+
+    def pause_transcription(self) -> None:
+        """Temporarily stop sending audio / emitting transcripts."""
+        if not self._transcription_enabled:
+            return
+        self._transcription_enabled = False
+        self._logger.info(
+            "Transcription paused",
+            extra={"session_id": self._session_id},
+        )
+
+    def resume_transcription(self) -> None:
+        """Resume sending audio / emitting transcripts."""
+        if self._transcription_enabled:
+            return
+        self._transcription_enabled = True
+        self._logger.info(
+            "Transcription resumed",
+            extra={"session_id": self._session_id},
+        )
+
     def _build_end_of_stream_message(self) -> str:
         return json.dumps(
             {
@@ -1077,6 +1100,18 @@ class SpeechStream(stt.SpeechStream):
 
         try:
             async for frame in self._input_ch:
+                # If paused, just drop audio frames and keep looping
+                if not self._transcription_enabled:
+                    if isinstance(frame, self._FlushSentinel):
+                        # still honor FlushSentinel to not block shutdown
+                        self._logger.debug(
+                            "FlushSentinel received while paused",
+                            extra={"session_id": self._session_id},
+                        )
+                        await ws.send_str(self._END_OF_STREAM_MSG)
+                        break
+                    continue
+
                 if isinstance(frame, rtc.AudioFrame):
                     try:
                         # Convert audio frame to Int16 data

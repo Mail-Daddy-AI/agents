@@ -1839,6 +1839,12 @@ class AgentActivity(RecognitionHooks):
             and len(split_words(info.new_transcript, split_character=True))
             < self._session.options.interruption["min_words"]
         ):
+            if self._session.options.clear_buffer_if_not_interrupted:
+                self.clear_user_turn()
+                logger.info(
+                    "skipping user input, too few words detected to interrupt current speech",
+                    extra={"user_input": info.new_transcript},
+                )
             self._cancel_preemptive_generation()
             # avoid interruption if the new_transcript is too short
             return False
