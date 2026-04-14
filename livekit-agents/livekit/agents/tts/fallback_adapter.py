@@ -92,6 +92,7 @@ class FallbackAdapter(
 
         self._tts_instances = tts
         self._max_retry_per_tts = max_retry_per_tts
+        self._current_tts_index: int = 0
 
         self._status: list[_TTSStatus] = []
         for t in tts:
@@ -112,6 +113,27 @@ class FallbackAdapter(
     @property
     def provider(self) -> str:
         return "livekit"
+
+    def _ordered_indices(self) -> list[int]:
+        n = len(self._tts_instances)
+        return (
+            [self._current_tts_index]
+            + list(range(self._current_tts_index + 1, n))
+            + list(range(0, self._current_tts_index))
+        )
+
+    def _mark_failed(self, idx: int) -> None:
+        self._status[idx].available = False
+
+        for i in self._ordered_indices()[1:]:
+            if self._status[i].available:
+                self._current_tts_index = i
+                logger.info(
+                    f"Auto switch TTS from "
+                    f"{self._tts_instances[idx].label} "
+                    f"to {self._tts_instances[i].label}"
+                )
+                return
 
     def synthesize(
         self, text: str, *, conn_options: APIConnectOptions = DEFAULT_FALLBACK_API_CONNECT_OPTIONS
@@ -218,7 +240,16 @@ class FallbackChunkedStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        for i, tts in enumerate(self._tts._tts_instances):
+        adapter = self._tts
+
+        indices = (
+            range(len(adapter._tts_instances))
+            if all_failed
+            else adapter._ordered_indices()
+        )
+
+        for i in indices:
+            tts = adapter._tts_instances[i]
             tts_status = self._tts._status[i]
             if tts_status.available or all_failed:
                 try:
@@ -247,7 +278,7 @@ class FallbackChunkedStream(ChunkedStream):
                     return
                 except Exception:  # exceptions already logged inside _try_synthesize
                     if tts_status.available:
-                        tts_status.available = False
+                        adapter._mark_failed(i)
                         self._tts.emit(
                             "tts_availability_changed",
                             AvailabilityChangedEvent(tts=tts, available=False),
@@ -259,7 +290,8 @@ class FallbackChunkedStream(ChunkedStream):
                         )
                         return
 
-            self._try_recovery(tts)
+            if not tts_status.available:
+                self._try_recovery(tts)
 
         raise APIConnectionError(
             f"all TTSs failed ({[tts.label for tts in self._tts._tts_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
@@ -364,7 +396,16 @@ class FallbackSynthesizeStream(SynthesizeStream):
         input_task = asyncio.create_task(_forward_input_task())
 
         try:
-            for i, tts in enumerate(self._fallback_adapter._tts_instances):
+            adapter = self._fallback_adapter
+
+            indices = (
+                range(len(adapter._tts_instances))
+                if all_failed
+                else adapter._ordered_indices()
+            )
+
+            for i in indices:
+                tts = adapter._tts_instances[i]
                 tts_status = self._fallback_adapter._status[i]
                 if tts_status.available or all_failed:
                     try:
@@ -413,7 +454,7 @@ class FallbackSynthesizeStream(SynthesizeStream):
                         return
                     except Exception:
                         if tts_status.available:
-                            tts_status.available = False
+                            adapter._mark_failed(i)
                             self._tts.emit(
                                 "tts_availability_changed",
                                 AvailabilityChangedEvent(tts=tts, available=False),
@@ -425,7 +466,8 @@ class FallbackSynthesizeStream(SynthesizeStream):
                             )
                             return
 
-                self._try_recovery(tts)
+                if not tts_status.available:
+                    self._try_recovery(tts)
 
             raise APIConnectionError(
                 f"all TTSs failed ({[tts.label for tts in self._fallback_adapter._tts_instances]}) after {time.time() - start_time} seconds"  # noqa: E501

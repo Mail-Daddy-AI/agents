@@ -85,6 +85,7 @@ class FallbackAdapter(
 
         self._stt_instances = stt
         self._attempt_timeout = attempt_timeout
+        self._current_stt_index: int = 0
         self._max_retry_per_stt = max_retry_per_stt
         self._retry_interval = retry_interval
 
@@ -108,6 +109,60 @@ class FallbackAdapter(
     @property
     def provider(self) -> str:
         return "livekit"
+
+    def switch_to_next(self, *, only_if_available: bool = True) -> bool:
+        """
+        Move pointer to next STT in order.
+
+        Args:
+            only_if_available: if True, skip unavailable STTs
+
+        Returns:
+            True if switched, False otherwise
+        """
+
+        n = len(self._stt_instances)
+        start = self._current_stt_index
+
+        for offset in range(1, n + 1):
+            i = (start + offset) % n
+            status = self._status[i]
+
+            if not only_if_available or status.available:
+                prev = self._current_stt_index
+                self._current_stt_index = i
+
+                logger.info(
+                    f"Manual switch STT from "
+                    f"{self._stt_instances[prev].label} "
+                    f"to {self._stt_instances[i].label}"
+                )
+
+                return True
+
+        return False
+
+    def _ordered_indices(self) -> list[int]:
+        n = len(self._stt_instances)
+        return (
+            [self._current_stt_index]
+            + list(range(self._current_stt_index + 1, n))
+            + list(range(0, self._current_stt_index))
+        )
+
+
+    def _mark_failed(self, idx: int) -> None:
+        self._status[idx].available = False
+
+        for i in self._ordered_indices()[1:]:
+            if self._status[i].available:
+                self._current_stt_index = i
+                logger.info(
+                    f"Auto switch STT from "
+                    f"{self._stt_instances[idx].label} "
+                    f"to {self._stt_instances[i].label}"
+                )
+                return
 
     async def _try_recognize(
         self,
@@ -217,7 +272,14 @@ class FallbackAdapter(
         if all_failed:
             logger.error("all STTs are unavailable, retrying..")
 
-        for i, stt in enumerate(self._stt_instances):
+        indices = (
+            range(len(self._stt_instances))
+            if all_failed
+            else self._ordered_indices()
+        )
+
+        for i in indices:
+            stt = self._stt_instances[i]
             stt_status = self._status[i]
             if stt_status.available or all_failed:
                 try:
@@ -230,13 +292,19 @@ class FallbackAdapter(
                     )
                 except Exception:  # exceptions already logged inside _try_recognize
                     if stt_status.available:
-                        stt_status.available = False
+                        self._mark_failed(i)
                         self.emit(
                             "stt_availability_changed",
                             AvailabilityChangedEvent(stt=stt, available=False),
                         )
 
-            self._try_recovery(stt=stt, buffer=buffer, language=language, conn_options=conn_options)
+            if not stt_status.available:
+                self._try_recovery(
+                    stt=stt,
+                    buffer=buffer,
+                    language=language,
+                    conn_options=conn_options,
+                )
 
         raise APIConnectionError(
             f"all STTs failed ({[stt.label for stt in self._stt_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
@@ -323,8 +391,17 @@ class FallbackRecognizeStream(RecognizeStream):
                 with contextlib.suppress(RuntimeError):
                     main_stream.end_input()
 
-        for i, stt in enumerate(self._fallback_adapter._stt_instances):
-            stt_status = self._fallback_adapter._status[i]
+        adapter = self._fallback_adapter
+
+        indices = (
+            range(len(adapter._stt_instances))
+            if all_failed
+            else adapter._ordered_indices()
+        )
+
+        for i in indices:
+            stt = adapter._stt_instances[i]
+            stt_status = adapter._status[i]
             if stt_status.available or all_failed:
                 try:
                     main_stream = stt.stream(
@@ -368,13 +445,14 @@ class FallbackRecognizeStream(RecognizeStream):
                     return
                 except Exception:
                     if stt_status.available:
-                        stt_status.available = False
+                        adapter._mark_failed(i)
                         self._stt.emit(
                             "stt_availability_changed",
                             AvailabilityChangedEvent(stt=stt, available=False),
                         )
 
-            self._try_recovery(stt)
+            if not stt_status.available:
+                self._try_recovery(stt)
 
         if forward_input_task is not None:
             await aio.cancel_and_wait(forward_input_task)
