@@ -253,10 +253,7 @@ class FallbackChunkedStream(ChunkedStream):
             tts = adapter._tts_instances[i]
             tts_status = self._tts._status[i]
             if tts_status.available or all_failed:
-                logger.debug(
-                    f"tts.FallbackAdapter sending request to {tts.label}",
-                    extra={"request_id": request_id, "tts_label": tts.label},
-                )
+                logger.debug(f"tts.FallbackAdapter request_id={request_id} sending request to {tts.label}")
                 try:
                     resampler = (
                         rtc.AudioResampler(
@@ -280,20 +277,10 @@ class FallbackChunkedStream(ChunkedStream):
                         for rf in resampler.flush():
                             output_emitter.push(rf.data.tobytes())
 
-                    logger.debug(
-                        f"tts.FallbackAdapter received response from {tts.label}",
-                        extra={
-                            "request_id": request_id,
-                            "tts_label": tts.label,
-                            "duration": time.time() - start_time,
-                        },
-                    )
+                    logger.debug(f"tts.FallbackAdapter request_id={request_id} received response from {tts.label} successfully after {time.time() - start_time} seconds")
                     return
                 except Exception:  # exceptions already logged inside _try_synthesize
-                    logger.warning(
-                        f"tts.FallbackAdapter request to {tts.label} failed",
-                        extra={"request_id": request_id, "tts_label": tts.label},
-                    )
+                    logger.warning(f"tts.FallbackAdapter request_id={request_id} request to {tts.label} failed")
                     if tts_status.available:
                         adapter._mark_failed(i)
                         self._tts.emit(
@@ -426,10 +413,7 @@ class FallbackSynthesizeStream(SynthesizeStream):
                 tts = adapter._tts_instances[i]
                 tts_status = self._fallback_adapter._status[i]
                 if tts_status.available or all_failed:
-                    logger.debug(
-                        f"tts.FallbackAdapter sending streaming request to {tts.label}",
-                        extra={"request_id": request_id, "tts_label": tts.label},
-                    )
+                    logger.debug(f"tts.FallbackAdapter request_id={request_id} sending streaming request to {tts.label}")
                     try:
                         new_input_ch = aio.Chan[str | SynthesizeStream._FlushSentinel]()
 
@@ -473,20 +457,10 @@ class FallbackSynthesizeStream(SynthesizeStream):
                             else:
                                 output_emitter.push(synthesized_audio.frame.data.tobytes())
 
-                        logger.debug(
-                            f"tts.FallbackAdapter received streaming response from {tts.label}",
-                            extra={
-                                "request_id": request_id,
-                                "tts_label": tts.label,
-                                "duration": time.time() - start_time,
-                            },
-                        )
+                        logger.debug(f"tts.FallbackAdapter request_id={request_id} received streaming response from {tts.label} successfully after {time.time() - start_time} seconds")
                         return
                     except Exception:
-                        logger.warning(
-                            f"tts.FallbackAdapter streaming request to {tts.label} failed",
-                            extra={"request_id": request_id, "tts_label": tts.label},
-                        )
+                        logger.warning(f"tts.FallbackAdapter request_id={request_id} streaming request to {tts.label} failed")
                         if tts_status.available:
                             adapter._mark_failed(i)
                             self._tts.emit(
