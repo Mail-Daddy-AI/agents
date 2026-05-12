@@ -233,8 +233,9 @@ class FallbackChunkedStream(ChunkedStream):
         if all_failed:
             logger.error("all TTSs are unavailable, retrying..")
 
+        request_id = utils.shortuuid()
         output_emitter.initialize(
-            request_id=utils.shortuuid(),
+            request_id=request_id,
             sample_rate=self._tts.sample_rate,
             num_channels=self._tts.num_channels,
             mime_type="audio/pcm",
@@ -252,6 +253,10 @@ class FallbackChunkedStream(ChunkedStream):
             tts = adapter._tts_instances[i]
             tts_status = self._tts._status[i]
             if tts_status.available or all_failed:
+                logger.debug(
+                    f"tts.FallbackAdapter sending request to {tts.label}",
+                    extra={"request_id": request_id, "tts_label": tts.label},
+                )
                 try:
                     resampler = (
                         rtc.AudioResampler(
@@ -275,8 +280,20 @@ class FallbackChunkedStream(ChunkedStream):
                         for rf in resampler.flush():
                             output_emitter.push(rf.data.tobytes())
 
+                    logger.debug(
+                        f"tts.FallbackAdapter received response from {tts.label}",
+                        extra={
+                            "request_id": request_id,
+                            "tts_label": tts.label,
+                            "duration": time.time() - start_time,
+                        },
+                    )
                     return
                 except Exception:  # exceptions already logged inside _try_synthesize
+                    logger.warning(
+                        f"tts.FallbackAdapter request to {tts.label} failed",
+                        extra={"request_id": request_id, "tts_label": tts.label},
+                    )
                     if tts_status.available:
                         adapter._mark_failed(i)
                         self._tts.emit(
@@ -371,8 +388,9 @@ class FallbackSynthesizeStream(SynthesizeStream):
             logger.error("all TTSs are unavailable, retrying..")
 
         new_input_ch: aio.Chan[str | SynthesizeStream._FlushSentinel] | None = None
+        request_id = utils.shortuuid()
         output_emitter.initialize(
-            request_id=utils.shortuuid(),
+            request_id=request_id,
             sample_rate=self._fallback_adapter.sample_rate,
             num_channels=self._fallback_adapter.num_channels,
             mime_type="audio/pcm",
@@ -408,6 +426,10 @@ class FallbackSynthesizeStream(SynthesizeStream):
                 tts = adapter._tts_instances[i]
                 tts_status = self._fallback_adapter._status[i]
                 if tts_status.available or all_failed:
+                    logger.debug(
+                        f"tts.FallbackAdapter sending streaming request to {tts.label}",
+                        extra={"request_id": request_id, "tts_label": tts.label},
+                    )
                     try:
                         new_input_ch = aio.Chan[str | SynthesizeStream._FlushSentinel]()
 
@@ -451,8 +473,20 @@ class FallbackSynthesizeStream(SynthesizeStream):
                             else:
                                 output_emitter.push(synthesized_audio.frame.data.tobytes())
 
+                        logger.debug(
+                            f"tts.FallbackAdapter received streaming response from {tts.label}",
+                            extra={
+                                "request_id": request_id,
+                                "tts_label": tts.label,
+                                "duration": time.time() - start_time,
+                            },
+                        )
                         return
                     except Exception:
+                        logger.warning(
+                            f"tts.FallbackAdapter streaming request to {tts.label} failed",
+                            extra={"request_id": request_id, "tts_label": tts.label},
+                        )
                         if tts_status.available:
                             adapter._mark_failed(i)
                             self._tts.emit(

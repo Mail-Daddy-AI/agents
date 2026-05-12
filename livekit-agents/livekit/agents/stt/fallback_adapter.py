@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import dataclasses
 import time
+import uuid
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -173,8 +174,10 @@ class FallbackAdapter(
         conn_options: APIConnectOptions,
         recovering: bool = False,
     ) -> SpeechEvent:
+        req_id = str(uuid.uuid4())
         try:
-            return await stt.recognize(
+            logger.info(f"[{req_id}] STT Request: Sending recognize request to {stt.label} (language={language})")
+            stt_result = await stt.recognize(
                 buffer,
                 language=language,
                 conn_options=dataclasses.replace(
@@ -184,13 +187,15 @@ class FallbackAdapter(
                     retry_interval=self._retry_interval,
                 ),
             )
+            logger.info(f"[{req_id}] STT Response: Received response from {stt.label}: {stt_result}")
+            return stt_result
         except asyncio.TimeoutError:
             if recovering:
-                logger.warning(f"{stt.label} recovery timed out", extra={"streamed": False})
+                logger.warning(f"[{req_id}] {stt.label} recovery timed out", extra={"streamed": False})
                 raise
 
             logger.warning(
-                f"{stt.label} timed out, switching to next STT",
+                f"[{req_id}] {stt.label} timed out, switching to next STT",
                 extra={"streamed": False},
             )
 
@@ -198,14 +203,14 @@ class FallbackAdapter(
         except APIError as e:
             if recovering:
                 logger.warning(
-                    f"{stt.label} recovery failed",
+                    f"[{req_id}] {stt.label} recovery failed",
                     exc_info=e,
                     extra={"streamed": False},
                 )
                 raise
 
             logger.warning(
-                f"{stt.label} failed, switching to next STT",
+                f"[{req_id}] {stt.label} failed, switching to next STT",
                 exc_info=e,
                 extra={"streamed": False},
             )
@@ -213,12 +218,12 @@ class FallbackAdapter(
         except Exception:
             if recovering:
                 logger.exception(
-                    f"{stt.label} recovery unexpected error", extra={"streamed": False}
+                    f"[{req_id}] {stt.label} recovery unexpected error", extra={"streamed": False}
                 )
                 raise
 
             logger.exception(
-                f"{stt.label} unexpected error, switching to next STT",
+                f"[{req_id}] {stt.label} unexpected error, switching to next STT",
                 extra={"streamed": False},
             )
             raise
@@ -239,6 +244,7 @@ class FallbackAdapter(
 
             async def _recover_stt_task(stt: STT) -> None:
                 try:
+                    logger.info(f"Trying to recover {stt.label}...")
                     await self._try_recognize(
                         stt=stt,
                         buffer=buffer,
@@ -366,12 +372,15 @@ class FallbackRecognizeStream(RecognizeStream):
         forward_input_task: asyncio.Task[None] | None = None
 
         async def _forward_input_task() -> None:
+            frame_counter = 0
             async for data in self._input_ch:
                 for stream in list(self._recovering_streams):
                     try:
                         if isinstance(data, rtc.AudioFrame):
+                            logger.debug(f"STT Stream Request: Pushing audio frame to recovering stream ({stream._stt.label})")
                             stream.push_frame(data)
                         elif isinstance(data, self._FlushSentinel):
+                            logger.info(f"STT Stream Request: Flushing recovering stream ({stream._stt.label})")
                             stream.flush()
                     except Exception:
                         pass
@@ -379,8 +388,14 @@ class FallbackRecognizeStream(RecognizeStream):
                 if main_stream is not None:
                     try:
                         if isinstance(data, rtc.AudioFrame):
+                            frame_counter += 1
+                            # Check if we hit the frame limit (e.g., ~5 seconds)
+                            if frame_counter >= 200:
+                                logger.debug(f"STT Stream Request: Pushing audio frame to main stream ({main_stream._stt.label})")
+                                frame_counter = 0 # Reset the counter
                             main_stream.push_frame(data)
                         elif isinstance(data, self._FlushSentinel):
+                            logger.info(f"STT Stream Request: Flushing main stream ({main_stream._stt.label})")
                             main_stream.flush()
                     except Exception:
                         logger.exception(
@@ -389,6 +404,7 @@ class FallbackRecognizeStream(RecognizeStream):
 
             if main_stream is not None:
                 with contextlib.suppress(RuntimeError):
+                    logger.info(f"STT Stream Request: Ending input for main stream ({main_stream._stt.label})")
                     main_stream.end_input()
 
         adapter = self._fallback_adapter
@@ -403,7 +419,9 @@ class FallbackRecognizeStream(RecognizeStream):
             stt = adapter._stt_instances[i]
             stt_status = adapter._status[i]
             if stt_status.available or all_failed:
+                req_id = str(uuid.uuid4())
                 try:
+                    logger.info(f"[{req_id}] STT Stream Request: Starting stream for {stt.label} (language={self._language})")
                     main_stream = stt.stream(
                         language=self._language,
                         conn_options=dataclasses.replace(
@@ -420,24 +438,25 @@ class FallbackRecognizeStream(RecognizeStream):
                     try:
                         async with main_stream:
                             async for ev in main_stream:
+                                logger.info(f"[{req_id}] STT Stream Response: Received event from {stt.label}: {ev}")
                                 self._event_ch.send_nowait(ev)
 
                     except asyncio.TimeoutError:
                         logger.warning(
-                            f"{stt.label} timed out, switching to next STT",
+                            f"[{req_id}] {stt.label} timed out, switching to next STT",
                             extra={"streamed": True},
                         )
                         raise
                     except APIError as e:
                         logger.warning(
-                            f"{stt.label} failed, switching to next STT",
+                            f"[{req_id}] {stt.label} failed, switching to next STT",
                             exc_info=e,
                             extra={"streamed": True},
                         )
                         raise
                     except Exception:
                         logger.exception(
-                            f"{stt.label} unexpected error, switching to next STT",
+                            f"[{req_id}] {stt.label} unexpected error, switching to next STT",
                             extra={"streamed": True},
                         )
                         raise
@@ -468,6 +487,8 @@ class FallbackRecognizeStream(RecognizeStream):
             self._fallback_adapter._stt_instances.index(stt)
         ]
         if stt_status.recovering_stream_task is None or stt_status.recovering_stream_task.done():
+            req_id = str(uuid.uuid4())
+            logger.info(f"[{req_id}] STT Recovery Stream Request: Starting stream for {stt.label}")
             stream = stt.stream(
                 language=self._language,
                 conn_options=dataclasses.replace(
@@ -483,6 +504,7 @@ class FallbackRecognizeStream(RecognizeStream):
                     nb_transcript = 0
                     async with stream:
                         async for ev in stream:
+                            logger.info(f"[{req_id}] STT Recovery Stream Response: Received event from {stt.label}: {ev}")
                             if ev.type == SpeechEventType.FINAL_TRANSCRIPT:
                                 if not ev.alternatives or not ev.alternatives[0].text:
                                     continue
@@ -502,18 +524,18 @@ class FallbackRecognizeStream(RecognizeStream):
 
                 except asyncio.TimeoutError:
                     logger.warning(
-                        f"{stream._stt.label} recovery timed out",
+                        f"[{req_id}] {stream._stt.label} recovery timed out",
                         extra={"streamed": True},
                     )
                 except APIError as e:
                     logger.warning(
-                        f"{stream._stt.label} recovery failed",
+                        f"[{req_id}] {stream._stt.label} recovery failed",
                         exc_info=e,
                         extra={"streamed": True},
                     )
                 except Exception:
                     logger.exception(
-                        f"{stream._stt.label} recovery unexpected error",
+                        f"[{req_id}] {stream._stt.label} recovery unexpected error",
                         extra={"streamed": True},
                     )
                     raise
