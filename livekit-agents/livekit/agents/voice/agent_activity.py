@@ -6,7 +6,7 @@ import heapq
 import json
 import time
 from collections.abc import AsyncIterable, Coroutine, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import context as otel_context, trace
@@ -171,6 +171,8 @@ class AgentActivity(RecognitionHooks):
 
         self._preemptive_generation: _PreemptiveGeneration | None = None
         self._preemptive_generation_count: int = 0
+        # transcript held when a user turn is too short to interrupt; prepended on the next commit
+        self._deferred_user_transcript: str = ""
         self._authorization_allowed = asyncio.Event()
         self._authorization_allowed.set()
 
@@ -1277,9 +1279,29 @@ class AgentActivity(RecognitionHooks):
         return future
 
     def clear_user_turn(self) -> None:
+        self._deferred_user_transcript = ""
         if self._audio_recognition:
             self._audio_recognition.clear_user_turn()
 
+        if self._rt_session is not None:
+            self._rt_session.clear_audio()
+
+    def _transcript_with_deferred(self, transcript: str) -> str:
+        if not self._deferred_user_transcript:
+            return transcript
+        return f"{self._deferred_user_transcript} {transcript}".strip()
+
+    def _defer_user_transcript(self, transcript: str) -> None:
+        if not transcript:
+            return
+        self._deferred_user_transcript = (
+            f"{self._deferred_user_transcript} {transcript}".strip()
+            if self._deferred_user_transcript
+            else transcript
+        )
+        # clear the live STT buffer only; deferred text is prepended on the next committed turn
+        if self._audio_recognition:
+            self._audio_recognition.clear_user_turn()
         if self._rt_session is not None:
             self._rt_session.clear_audio()
 
@@ -1835,9 +1857,10 @@ class AgentActivity(RecognitionHooks):
 
         self._preemptive_generation_count += 1
 
+        transcript = self._transcript_with_deferred(info.new_transcript)
         user_message = llm.ChatMessage(
             role="user",
-            content=[info.new_transcript],
+            content=[transcript],
             transcript_confidence=info.transcript_confidence,
         )
 
@@ -1853,7 +1876,7 @@ class AgentActivity(RecognitionHooks):
         self._preemptive_generation = _PreemptiveGeneration(
             speech_handle=speech_handle,
             user_message=user_message,
-            info=info,
+            info=replace(info, new_transcript=transcript),
             chat_ctx=chat_ctx.copy(),
             tools=self.tools.copy(),
             tool_choice=self._tool_choice,
@@ -1896,13 +1919,22 @@ class AgentActivity(RecognitionHooks):
         ):
             if self._session.options.clear_buffer_if_not_interrupted:
                 self.clear_user_turn()
-                logger.info(
-                    "skipping user input, too few words detected to interrupt current speech",
-                    extra={"user_input": info.new_transcript},
-                )
+            else:
+                self._defer_user_transcript(info.new_transcript)
+            logger.info(
+                "skipping user input, too few words detected to interrupt current speech",
+                extra={"user_input": info.new_transcript},
+            )
             self._cancel_preemptive_generation()
             # avoid interruption if the new_transcript is too short
             return False
+
+        if self._deferred_user_transcript:
+            info = replace(
+                info,
+                new_transcript=self._transcript_with_deferred(info.new_transcript),
+            )
+            self._deferred_user_transcript = ""
 
         old_task = self._user_turn_completed_atask
         self._user_turn_completed_atask = self._create_speech_task(
