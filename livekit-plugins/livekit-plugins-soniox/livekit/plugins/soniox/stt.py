@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+import weakref
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
@@ -127,6 +129,14 @@ class STTOptions:
     client_reference_id: str | None = None
     translation: TranslationConfig | None = None
 
+    start_paused: bool = False
+    """If True, the stream starts paused — no WebSocket is opened
+    to Soniox until ``resume_transcription()`` is called, so no charges accrue.
+    Useful for outbound calls where you only want transcription after pickup.
+
+    Set to False to behave like a regular always-on transcriber: the WebSocket
+    is opened as soon as the stream starts and audio flows immediately."""
+
     def __post_init__(self) -> None:
         if not (500 <= self.max_endpoint_delay_ms <= 3000):
             raise ValueError("max_endpoint_delay_ms must be between 500 and 3000")
@@ -178,6 +188,11 @@ class STT(stt.STT):
         self._http_session = http_session
         self._params = params
 
+        # Track active streams so callers can pause/resume them all at once
+        # (e.g. when a call gets picked up). WeakSet so finished streams don't
+        # leak.
+        self._streams: weakref.WeakSet[SpeechStream] = weakref.WeakSet()
+
     @property
     def model(self) -> str:
         return self._params.model
@@ -206,10 +221,22 @@ class STT(stt.STT):
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> SpeechStream:
         """Return a new LiveKit streaming speech-to-text session."""
-        return SpeechStream(
+        stream = SpeechStream(
             stt=self,
             conn_options=conn_options,
         )
+        self._streams.add(stream)
+        return stream
+
+    def pause_all_streams(self) -> None:
+        """Pause every active stream produced by this STT instance."""
+        for stream in self._streams:
+            stream.pause_transcription()
+
+    def resume_all_streams(self) -> None:
+        """Resume every active stream produced by this STT instance."""
+        for stream in self._streams:
+            stream.resume_transcription()
 
 
 class SpeechStream(stt.SpeechStream):
@@ -227,6 +254,43 @@ class SpeechStream(stt.SpeechStream):
         self.audio_queue: asyncio.Queue[bytes | str] = asyncio.Queue()
 
         self._reported_duration_ms = 0
+
+        # Pause state. When paused, no Soniox WebSocket is opened — Soniox bills
+        # for the full stream duration regardless of whether audio is being sent,
+        # so the only way to avoid charges is to not open the connection at all
+        # until needed. Controlled by STTOptions.start_paused.
+        self._paused: bool = stt._params.start_paused
+        self._resume_event = asyncio.Event()
+        if not self._paused:
+            self._resume_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def pause_transcription(self) -> None:
+        """Pause transcription: close the Soniox WebSocket and stop billing."""
+        if self._paused:
+            return
+        self._paused = True
+        self._resume_event.clear()
+        # Drop any buffered audio so nothing stale is sent on reconnect.
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        # Wake _run() so it tears down the live WebSocket.
+        self._reconnect_event.set()
+        logger.info("Soniox transcription paused — WebSocket will be closed")
+
+    def resume_transcription(self) -> None:
+        """Resume transcription: open a fresh Soniox WebSocket and start billing."""
+        if not self._paused:
+            return
+        self._paused = False
+        self._resume_event.set()
+        logger.info("Soniox transcription resumed — opening WebSocket")
 
     def _ensure_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp ClientSession for WebSocket connections."""
@@ -300,8 +364,19 @@ class SpeechStream(stt.SpeechStream):
         self._reported_duration_ms = int(total_audio_proc_ms)
 
     async def _run(self) -> None:
-        """Manage connection lifecycle, spawning tasks and handling reconnection."""
+        """Manage connection lifecycle, spawning tasks and handling reconnection.
+
+        When paused, no WebSocket is opened — Soniox bills for stream duration,
+        so we must keep the session closed entirely until resume.
+        """
         while True:
+            # If paused, wait here until resume_transcription() is called.
+            # No WebSocket is opened in this branch, so Soniox cannot bill.
+            if self._paused:
+                await self._wait_until_resumed()
+                self._reconnect_event.clear()
+                continue
+
             try:
                 ws = await self._connect_ws()
                 self._ws = ws
@@ -363,6 +438,32 @@ class SpeechStream(stt.SpeechStream):
                 if self._ws is not None:
                     await self._ws.close()
                     self._ws = None
+
+    async def _wait_until_resumed(self) -> None:
+        """Block until resume_transcription() is called.
+
+        While waiting, audio frames from _input_ch are drained and discarded so
+        they don't accumulate unbounded in the channel.
+        """
+        logger.debug("Soniox stream paused — no WebSocket, dropping audio")
+        drain_task = asyncio.create_task(self._drain_input_while_paused())
+        try:
+            await self._resume_event.wait()
+        finally:
+            drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await drain_task
+        logger.debug("Soniox stream resumed — opening WebSocket")
+
+    async def _drain_input_while_paused(self) -> None:
+        """Read and discard audio frames so they don't pile up in the input channel."""
+        try:
+            async for _ in self._input_ch:
+                pass  # discard
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Error draining input channel while paused: {e}")
 
     async def _keepalive_task(self) -> None:
         """Periodically send keepalive messages (while no audio is being sent)
