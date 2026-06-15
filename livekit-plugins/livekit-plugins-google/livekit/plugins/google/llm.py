@@ -36,7 +36,7 @@ from livekit.agents.utils import is_given
 
 from .log import logger
 from .models import ChatModels
-from .utils import create_tools_config, to_response_format
+from .utils import create_tools_config, log_generate_content_request_options, to_response_format
 from .version import __version__
 
 
@@ -446,6 +446,14 @@ class LLMStream(llm.LLMStream):
                 ),
                 http_options=http_options,
                 **self._extra_kwargs,
+            )
+
+            log_generate_content_request_options(
+                client=self._client,
+                model=self._model,
+                contents=turns,
+                config=config,
+                http_options=http_options,
             )
 
             stream = await self._client.aio.models.generate_content_stream(

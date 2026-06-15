@@ -1,20 +1,74 @@
 from __future__ import annotations
 
+import logging
 import re
 from copy import deepcopy
 from typing import Any
 
 from pydantic import TypeAdapter
 
-from google.genai import types
+from google.genai import Client, types
 from livekit.agents import llm
 from livekit.agents.llm import utils as llm_utils
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 
+from .log import logger
 from .tools import GeminiTool
 
-__all__ = ["create_tools_config"]
+__all__ = ["create_tools_config", "log_generate_content_request_options"]
+
+_SENSITIVE_HEADER_KEYS = frozenset(
+    {"authorization", "x-goog-api-key", "api-key", "x-api-key"}
+)
+
+
+def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
+    redacted: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in _SENSITIVE_HEADER_KEYS or "token" in key.lower():
+            redacted[key] = "<redacted>"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def log_generate_content_request_options(
+    *,
+    client: Client,
+    model: str,
+    contents: list[types.Content],
+    config: types.GenerateContentConfig,
+    http_options: types.HttpOptions,
+) -> None:
+    """Log Gemini generateContent request details (mirrors OpenAI SDK debug output)."""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    headers = _redact_headers(dict(http_options.headers or {}))
+    if client.vertexai:
+        api_client = getattr(client, "_api_client", None)
+        location = getattr(api_client, "location", None) or "us-central1"
+        project = getattr(api_client, "project", None) or ""
+        url = (
+            f"/v1/projects/{project}/locations/{location}/"
+            f"publishers/google/models/{model}:streamGenerateContent"
+        )
+    else:
+        url = f"/v1beta/models/{model}:streamGenerateContent"
+
+    request_options = {
+        "method": "post",
+        "url": url,
+        "headers": headers,
+        "timeout": http_options.timeout,
+        "json_data": {
+            "model": model,
+            "contents": [content.model_dump(exclude_none=True) for content in contents],
+            "config": config.model_dump(exclude_none=True),
+        },
+    }
+    logger.debug("Request options: %s", request_options)
 
 
 def create_tools_config(
