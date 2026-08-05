@@ -65,8 +65,14 @@ def to_chat_ctx(
                     "args": json.loads(msg.arguments or "{}"),
                 }
             }
-            # Inject thought_signature if available (Gemini 3 multi-turn function calling)
-            if thought_signatures and (sig := thought_signatures.get(msg.call_id)):
+            # Inject thought_signature if available (Gemini 2.5+/3 multi-turn function
+            # calling). thought_signatures is only non-None when the target model
+            # requires one; if none was ever captured for this call (e.g. replayed from
+            # a thinking-disabled model, a non-Gemini fallback, or a different LLM
+            # instance), fall back to Google's documented bypass sentinel instead of
+            # omitting the field, which trips a hard "missing thought_signature" 400.
+            if thought_signatures is not None:
+                sig = thought_signatures.get(msg.call_id) or b"skip_thought_signature_validator"
                 fc_part["thought_signature"] = sig
             parts.append(fc_part)
         elif msg.type == "function_call_output":
