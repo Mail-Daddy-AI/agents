@@ -568,7 +568,7 @@ class SpeechStream(stt.SpeechStream):
 
                     try:
                         content = json.loads(msg.data)
-                        tokens = content["tokens"]
+                        tokens = content.get("tokens", [])
 
                         non_final = _TokenAccumulator()
                         non_final_original = _TokenAccumulator()
