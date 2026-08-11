@@ -373,11 +373,16 @@ class FallbackRecognizeStream(RecognizeStream):
 
         async def _forward_input_task() -> None:
             frame_counter = 0
+            recovering_frame_counters: dict[int, int] = {}
             async for data in self._input_ch:
                 for stream in list(self._recovering_streams):
                     try:
                         if isinstance(data, rtc.AudioFrame):
-                            logger.debug(f"STT Stream Request: Pushing audio frame to recovering stream ({stream._stt.label})")
+                            count = recovering_frame_counters.get(id(stream), 0) + 1
+                            if count >= 200:
+                                logger.debug(f"STT Stream Request: Pushing audio frame to recovering stream ({stream._stt.label})")
+                                count = 0
+                            recovering_frame_counters[id(stream)] = count
                             stream.push_frame(data)
                         elif isinstance(data, self._FlushSentinel):
                             logger.info(f"STT Stream Request: Flushing recovering stream ({stream._stt.label})")

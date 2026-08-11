@@ -417,6 +417,12 @@ class SpeechStream(stt.SpeechStream):
                     "Timeout connecting to or initializing Soniox Speech-to-Text API session"
                 ) from e
 
+            except APIStatusError:
+                # Already the right type (raised in _recv_messages_task for an in-band
+                # error_code/error_message) — re-raise as-is instead of falling through
+                # to the generic handler below and losing the status_code.
+                raise
+
             except aiohttp.ClientResponseError as e:
                 logger.error(
                     "Soniox Speech-to-Text API status error during session init:"
@@ -648,17 +654,33 @@ class SpeechStream(stt.SpeechStream):
                             self._report_processed_audio_duration(total_audio_proc_ms)
 
                         if content.get("error_code") or content.get("error_message"):
-                            logger.error(
-                                f"WebSocket error: {content.get('error_code')}"
-                                f" - {content.get('error_message')}"
+                            error_code = content.get("error_code")
+                            error_message = content.get("error_message")
+                            logger.error(f"WebSocket error: {error_code} - {error_message}")
+                            # In-band API error (e.g. 402 balance exhausted): the server
+                            # keeps the socket open with no more tokens coming, so if we
+                            # only log this the recv loop just idles/closes "normally" —
+                            # no exception ever reaches FallbackAdapter, so it never
+                            # switches to the fallback STT. Raise so it does.
+                            raise APIStatusError(
+                                message=error_message
+                                or "Soniox Speech-to-Text API returned an error",
+                                status_code=(
+                                    error_code if isinstance(error_code, int) else -1
+                                ),
+                                body=content,
                             )
 
                         if content.get("finished"):
                             logger.debug("Transcription finished")
 
+                    except APIStatusError:
+                        raise
                     except Exception as e:
                         logger.exception(f"Error processing message: {e}")
 
+            except APIStatusError:
+                raise
             except aiohttp.ClientError as e:
                 logger.error(f"WebSocket error while receiving: {e}")
             except Exception as e:
