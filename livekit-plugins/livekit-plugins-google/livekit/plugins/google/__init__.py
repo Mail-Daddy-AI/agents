@@ -20,7 +20,6 @@ See https://docs.livekit.io/agents/integrations/stt/google/ for more information
 """
 
 from . import beta, realtime, tools
-from .aiplatform_llm import AIPlatformLLM
 from .llm import LLM
 from .models import EndpointingSensitivity
 from .stt import STT, SpeechStream
@@ -36,7 +35,6 @@ __all__ = [
     "__version__",
     "beta",
     "LLM",
-    "AIPlatformLLM",
     "tools",
 ]
 from livekit.agents import Plugin

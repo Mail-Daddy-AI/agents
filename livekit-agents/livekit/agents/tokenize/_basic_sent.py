@@ -74,6 +74,6 @@ def split_sentences(
             buff = ""
 
     if buff:
-        sentences.append((buff[len(pre_pad) :], start_pos, len(text)))
+        sentences.append((buff[len(pre_pad) :], start_pos, len(text) - 1))
 
     return sentences

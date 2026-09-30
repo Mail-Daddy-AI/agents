@@ -12,8 +12,6 @@ from livekit.agents.types import (
     APIConnectOptions,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _make_stt(**kwargs):
     """Helper to create STT with required credentials."""

@@ -22,6 +22,7 @@ from livekit.agents import (
     AgentSession,
     AgentTask,
     JobContext,
+    JobProcess,
     MetricsCollectedEvent,
     cli,
     inference,
@@ -29,6 +30,8 @@ from livekit.agents import (
 )
 from livekit.agents.beta.workflows.dtmf_inputs import GetDtmfTask
 from livekit.agents.llm.tool_context import ToolError
+from livekit.plugins import silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv()
 
@@ -621,6 +624,13 @@ class RewardsTask(BaseBankTask):
 SubmenuTaskType = DepositAccountsTask | CreditCardsTask | LoansTask | RewardsTask
 
 
+def prewarm(proc: JobProcess) -> None:
+    proc.userdata["vad"] = silero.VAD.load()
+
+
+server.setup_fnc = prewarm
+
+
 @server.rtc_session(agent_name=BANK_IVR_DISPATCH_NAME)
 async def bank_ivr_session(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
@@ -629,9 +639,11 @@ async def bank_ivr_session(ctx: JobContext) -> None:
     state = SessionState()
 
     session: AgentSession[SessionState] = AgentSession(
+        vad=ctx.proc.userdata["vad"],
         llm=inference.LLM("openai/gpt-4.1"),
         stt=inference.STT("deepgram/nova-3"),
         tts=inference.TTS("cartesia/sonic-3"),
+        turn_detection=MultilingualModel(),
         userdata=state,
     )
 

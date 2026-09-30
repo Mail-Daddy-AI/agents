@@ -84,8 +84,7 @@ class StreamAdapterWrapper(SynthesizeStream):
         self._wrapped_tts_conn_options = conn_options
 
     async def _metrics_monitor_task(self, event_aiter: AsyncIterable[SynthesizedAudio]) -> None:
-        async for _ in event_aiter:
-            pass
+        pass  # do nothing
 
     async def _run(self, output_emitter: AudioEmitter) -> None:
         sent_stream = self._tts._sentence_tokenizer.stream()
@@ -129,12 +128,11 @@ class StreamAdapterWrapper(SynthesizeStream):
                 if not (text := ev.token.strip()):
                     continue
 
-                self._mark_started()
                 async with self._tts._wrapped_tts.synthesize(
                     text, conn_options=self._wrapped_tts_conn_options
                 ) as tts_stream:
                     async for audio in tts_stream:
-                        output_emitter.push_frame(audio.frame)
+                        output_emitter.push(audio.frame.data.tobytes())
                         duration += audio.frame.duration
                     output_emitter.flush()
 

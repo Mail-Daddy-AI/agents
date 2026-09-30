@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 from livekit.plugins.google import utils
 
-pytestmark = [pytest.mark.unit, pytest.mark.concurrent]
-
 #  Gemini Schema Tests
 
 

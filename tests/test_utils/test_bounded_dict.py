@@ -4,8 +4,6 @@ import pytest
 
 from livekit.agents.utils.bounded_dict import BoundedDict
 
-pytestmark = pytest.mark.unit
-
 
 @dataclass
 class _Item:

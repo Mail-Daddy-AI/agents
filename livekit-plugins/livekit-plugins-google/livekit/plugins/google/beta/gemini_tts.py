@@ -15,11 +15,7 @@ from livekit.agents.types import (
 )
 from livekit.agents.utils import is_given
 
-from ..log import logger
-
-GEMINI_TTS_MODELS = Literal[
-    "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts", "gemini-3.1-flash-tts-preview"
-]
+GEMINI_TTS_MODELS = Literal["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"]
 GEMINI_VOICES = Literal[
     "Zephyr",
     "Puck",
@@ -53,7 +49,7 @@ GEMINI_VOICES = Literal[
     "Sulafat",
 ]
 
-DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
+DEFAULT_MODEL = "gemini-2.5-flash-preview-tts"
 DEFAULT_VOICE = "Kore"
 DEFAULT_SAMPLE_RATE = 24000  # not configurable
 NUM_CHANNELS = 1
@@ -91,7 +87,7 @@ class TTS(tts.TTS):
         - For Google Gemini API: Set the `api_key` argument or the `GOOGLE_API_KEY` environment variable.
 
         Args:
-            model (str, optional): The Gemini TTS model to use. Defaults to "gemini-3.1-flash-tts-preview".
+            model (str, optional): The Gemini TTS model to use. Defaults to "gemini-2.5-flash-preview-tts".
             voice_name (str, optional): The voice to use for synthesis. Defaults to "Kore".
             api_key (str, optional): The API key for Google Gemini. If not provided, it attempts to read from the `GOOGLE_API_KEY` environment variable.
             vertexai (bool, optional): Whether to use VertexAI. Defaults to False.
@@ -182,13 +178,6 @@ class TTS(tts.TTS):
         if is_given(voice_name):
             self._opts.voice_name = voice_name
 
-    async def aclose(self) -> None:
-        """Close the TTS and release its GenAI HTTP clients."""
-        try:
-            await self._client.aio.aclose()
-        except Exception:
-            logger.warning("failed to close the genai client", exc_info=True)
-
 
 class ChunkedStream(tts.ChunkedStream):
     def __init__(self, *, tts: TTS, input_text: str, conn_options: APIConnectOptions) -> None:
@@ -211,7 +200,7 @@ class ChunkedStream(tts.ChunkedStream):
             if self._tts._opts.instructions is not None:
                 input_text = f'{self._tts._opts.instructions}:\n"{input_text}"'
 
-            response = await self._tts._client.aio.models.generate_content_stream(
+            response = await self._tts._client.aio.models.generate_content(
                 model=self._tts._opts.model,
                 contents=input_text,
                 config=config,
@@ -224,21 +213,22 @@ class ChunkedStream(tts.ChunkedStream):
                 mime_type="audio/pcm",
             )
 
-            async for chunk in response:
+            if (
+                not response.candidates
+                or not (content := response.candidates[0].content)
+                or not content.parts
+            ):
+                raise APIStatusError("No audio content generated")
+
+            for part in content.parts:
                 if (
-                    chunk.candidates
-                    and chunk.candidates[0].content
-                    and chunk.candidates[0].content.parts
+                    (inline_data := part.inline_data)
+                    and inline_data.data
+                    and inline_data.mime_type
+                    and inline_data.mime_type.startswith("audio/")
                 ):
-                    for part in chunk.candidates[0].content.parts:
-                        if (
-                            (inline_data := part.inline_data)
-                            and inline_data.data
-                            and inline_data.mime_type
-                            and inline_data.mime_type.startswith("audio/")
-                        ):
-                            # mime_type: audio/L16;codec=pcm;rate=24000
-                            output_emitter.push(inline_data.data)
+                    # mime_type: audio/L16;codec=pcm;rate=24000
+                    output_emitter.push(inline_data.data)
 
         except ClientError as e:
             raise APIStatusError(

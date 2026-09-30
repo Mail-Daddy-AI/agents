@@ -1,23 +1,13 @@
 from __future__ import annotations
 
 import itertools
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from livekit.agents import llm
 
-from .utils import (
-    convert_mid_conversation_instructions,
-    group_tool_calls,
-    parse_tool_call_arguments,
-)
-
-_AWS_IMAGE_FORMATS = {
-    "image/jpeg": "jpeg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/webp": "webp",
-}
+from .utils import convert_mid_conversation_instructions, group_tool_calls
 
 
 @dataclass
@@ -36,7 +26,7 @@ def to_chat_ctx(
     current_content: list[dict] = []
 
     for msg in itertools.chain(*(group.flatten() for group in group_tool_calls(chat_ctx))):
-        if msg.type == "message" and msg.role == "system" and (text := msg.raw_text_content):
+        if msg.type == "message" and msg.role == "system" and (text := msg.text_content):
             system_messages.append(text)
             continue
 
@@ -56,20 +46,17 @@ def to_chat_ctx(
 
         if msg.type == "message":
             for content in msg.content:
-                if isinstance(content, llm.ImageContent):
+                if content and isinstance(content, str):
+                    current_content.append({"text": content})
+                elif isinstance(content, llm.ImageContent):
                     current_content.append(_build_image(content))
-                elif isinstance(content, llm.AudioContent):
-                    pass
-                elif content:
-                    # str or Instructions
-                    current_content.append({"text": str(content)})
         elif msg.type == "function_call":
             current_content.append(
                 {
                     "toolUse": {
                         "toolUseId": msg.call_id,
                         "name": msg.name,
-                        "input": parse_tool_call_arguments(msg),
+                        "input": json.loads(msg.arguments or "{}"),
                     }
                 }
             )
@@ -108,23 +95,12 @@ def _build_image(image: llm.ImageContent) -> dict:
     if img.external_url:
         raise ValueError("external_url is not supported by AWS Bedrock.")
 
-    assert img.data_bytes is not None
     return {
         "image": {
-            "format": _image_format(img.mime_type),
+            "format": "jpeg",
             "source": {"bytes": img.data_bytes},
         }
     }
-
-
-def _image_format(mime_type: str | None) -> str:
-    if not mime_type:
-        return "jpeg"
-
-    try:
-        return _AWS_IMAGE_FORMATS[mime_type]
-    except KeyError:
-        raise ValueError(f"Unsupported mime_type {mime_type} for AWS Bedrock images") from None
 
 
 def to_fnc_ctx(tool_ctx: llm.ToolContext) -> list[dict[str, Any]]:

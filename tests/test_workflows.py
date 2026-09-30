@@ -8,8 +8,6 @@ from livekit.agents.llm.tool_context import ToolError
 from livekit.agents.voice.run_result import RunResult
 from livekit.rtc import Room
 
-pytestmark = pytest.mark.evals
-
 
 def _llm_model() -> llm.LLM:
     return inference.LLM(model="openai/gpt-4.1")
@@ -22,9 +20,7 @@ async def test_collect_email(input_modality: Literal["text", "audio"]) -> None:
         await sess.start(beta.workflows.GetEmailTask())
 
         result = await sess.run(
-            user_input="My email address is theo at livekit dot io?",
-            input_modality=input_modality,
-            output_type=(beta.workflows.GetEmailResult if input_modality == "text" else None),
+            user_input="My email address is theo at livekit dot io?", input_modality=input_modality
         )
 
         if input_modality == "text":

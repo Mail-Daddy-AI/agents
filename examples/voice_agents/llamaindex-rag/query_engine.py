@@ -18,6 +18,7 @@ from livekit.agents import (
     inference,
     llm,
 )
+from livekit.plugins import silero
 
 load_dotenv()
 
@@ -58,6 +59,7 @@ async def entrypoint(ctx: JobContext):
             "with users will be voice. You should use short and concise "
             "responses, and avoiding usage of unpronouncable punctuation."
         ),
+        vad=silero.VAD.load(),
         stt=inference.STT("deepgram/nova-3"),
         llm=inference.LLM("openai/gpt-4.1-mini"),
         tts=inference.TTS("cartesia/sonic-3"),

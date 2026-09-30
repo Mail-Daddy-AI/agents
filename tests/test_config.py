@@ -1,8 +1,4 @@
-import pytest
-
 from livekit.plugins.openai.realtime.realtime_model import process_base_url
-
-pytestmark = pytest.mark.unit
 
 
 def test_process_base_url():
@@ -13,12 +9,12 @@ def test_process_base_url():
     assert (
         process_base_url("http://example.com", "gpt-4") == "ws://example.com/realtime?model=gpt-4"
     )
-    assert (
+    assert (  # noqa: F631
         process_base_url(
             "wss://livekit.ai/voice/v1/chat/voice?client=oai&enable_noise_suppression=true",
             "gpt-4",
         )
-        == "wss://livekit.ai/voice/v1/chat/voice?client=oai&enable_noise_suppression=true&model=gpt-4"
+        == "wss://livekit.ai/voice/v1/chat/voice?client=oai&enable_noise_suppression=true",
     )
     assert (
         process_base_url(

@@ -12,7 +12,7 @@ from ..log import logger
 from ..utils import aio, log_exceptions, shortuuid
 from . import channel, proto
 from .inference_proc_lazy_main import ProcStartArgs, proc_main
-from .supervised_proc import SupervisedProc, SupervisedProcKind
+from .supervised_proc import SupervisedProc
 
 
 class InferenceProcExecutor(SupervisedProc):
@@ -46,10 +46,6 @@ class InferenceProcExecutor(SupervisedProc):
 
         self._runners = runners
         self._active_requests: dict[str, asyncio.Future[proto.InferenceResponse]] = {}
-
-    @property
-    def process_kind(self) -> SupervisedProcKind:
-        return SupervisedProcKind.INFERENCE
 
     def _create_process(self, cch: socket.socket, log_cch: socket.socket) -> mp.Process:
         proc_args = ProcStartArgs(
@@ -110,8 +106,4 @@ class InferenceProcExecutor(SupervisedProc):
         return extra
 
     def is_alive(self) -> bool:
-        try:
-            return self._proc.is_alive()
-        except ValueError:
-            # the process object is closed after _supervise_task exits
-            return False
+        return self._proc.is_alive()

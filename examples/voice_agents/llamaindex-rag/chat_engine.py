@@ -22,6 +22,7 @@ from livekit.agents import (
     llm,
 )
 from livekit.agents.voice.agent import ModelSettings
+from livekit.plugins import silero
 
 load_dotenv()
 
@@ -53,6 +54,7 @@ class ChatEngineAgent(Agent):
                 "with users will be voice. You should use short and concise "
                 "responses, and avoiding usage of unpronouncable punctuation."
             ),
+            vad=silero.VAD.load(),
             stt=inference.STT("deepgram/nova-3"),
             llm=DummyLLM(),  # use a dummy LLM to enable the pipeline reply
             tts=inference.TTS("cartesia/sonic-3"),

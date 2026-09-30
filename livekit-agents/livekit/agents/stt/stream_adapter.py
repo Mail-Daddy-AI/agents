@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import AsyncIterable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import utils
 from ..types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConnectOptions, NotGivenOr
 from ..vad import VAD, VADEventType
 from .stt import STT, RecognizeStream, SpeechEvent, SpeechEventType, STTCapabilities
-
-if TYPE_CHECKING:
-    from ..voice.events import ConversationItemAddedEvent
 
 # already a retry mechanism in STT.recognize, don't retry in stream adapter
 DEFAULT_STREAM_ADAPTER_API_CONNECT_OPTIONS = APIConnectOptions(
@@ -26,8 +22,6 @@ class StreamAdapter(STT):
                 streaming=True,
                 interim_results=False,
                 diarization=False,  # diarization requires streaming STT
-                keyterms=stt.capabilities.keyterms,
-                chat_context=stt.capabilities.chat_context,
             )
         )
         self._vad = vad
@@ -47,12 +41,6 @@ class StreamAdapter(STT):
     @property
     def provider(self) -> str:
         return self._stt.provider
-
-    def _update_session_keyterms(self, keyterms: list[str]) -> None:
-        self._stt._update_session_keyterms(keyterms)
-
-    def _push_conversation_item(self, item: ConversationItemAddedEvent) -> None:
-        self._stt._push_conversation_item(item)
 
     async def _recognize_impl(
         self,
@@ -78,9 +66,6 @@ class StreamAdapter(STT):
             language=language,
             conn_options=conn_options,
         )
-
-    def prewarm(self) -> None:
-        self._stt.prewarm()
 
     def _on_metrics_collected(self, *args: Any, **kwargs: Any) -> None:
         self.emit("metrics_collected", *args, **kwargs)
@@ -128,13 +113,9 @@ class StreamAdapterWrapper(RecognizeStream):
                 if event.type == VADEventType.START_OF_SPEECH:
                     self._event_ch.send_nowait(SpeechEvent(SpeechEventType.START_OF_SPEECH))
                 elif event.type == VADEventType.END_OF_SPEECH:
-                    speech_end_time = (
-                        time.time() - event.silence_duration - event.inference_duration
-                    )
                     self._event_ch.send_nowait(
                         SpeechEvent(
                             type=SpeechEventType.END_OF_SPEECH,
-                            speech_end_time=speech_end_time,
                         )
                     )
 
@@ -154,11 +135,6 @@ class StreamAdapterWrapper(RecognizeStream):
                         SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
                             alternatives=[t_event.alternatives[0]],
-                            speech_end_time=(
-                                t_event.speech_end_time
-                                if t_event.speech_end_time is not None
-                                else speech_end_time
-                            ),
                         )
                     )
 

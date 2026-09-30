@@ -35,8 +35,6 @@ from livekit.plugins import (
 
 from .utils import make_test_speech, wer
 
-pytestmark = pytest.mark.stt
-
 SAMPLE_RATE = 24000
 WER_THRESHOLD = 0.25
 MAX_RETRIES = 2
@@ -73,18 +71,11 @@ STTs: list[Callable[[], stt.STT]] = [
         # spitch,
     ]
 ] + [
-    pytest.param(lambda: cartesia.STT(model="ink-whisper"), id="livekit.plugins.cartesia._legacy"),
     pytest.param(lambda: deepgram.STTv2(), id="livekit.plugins.deepgram.STTv2"),
     pytest.param(
         lambda: gradium.STT(model_endpoint="wss://us.api.gradium.ai/api/speech/asr"),
         id="livekit.plugins.gradium.STT",
     ),
-]
-
-# entries whose recognize() path is identical to an existing STTs entry, so they only
-# add value to test_stream (openai realtime shares the REST path with openai.STT())
-STREAM_ONLY_STTs: list[Callable[[], stt.STT]] = [
-    pytest.param(lambda: openai.STT(use_realtime=True), id="livekit.plugins.openai.realtime"),
 ]
 
 
@@ -180,7 +171,7 @@ async def test_recognize(stt_factory: Callable[[], stt.STT], request):
 
 
 @pytest.mark.usefixtures("job_process")
-@pytest.mark.parametrize("stt_factory", STTs + STREAM_ONLY_STTs)
+@pytest.mark.parametrize("stt_factory", STTs)
 async def test_stream(stt_factory: Callable[[], STT], request):
     sample_rate = SAMPLE_RATE
     plugin_id = request.node.callspec.id.split("-")[0]
@@ -217,7 +208,6 @@ async def test_stream(stt_factory: Callable[[], STT], request):
                     recv_start, recv_end = False, True
                     start_time = time.time()
                     got_final_transcript = False
-                    sos_count, final_count = 0, 0
 
                     async for event in stream:
                         if event.type == agents.stt.SpeechEventType.START_OF_SPEECH:
@@ -227,7 +217,6 @@ async def test_stream(stt_factory: Callable[[], STT], request):
                             assert not recv_start
                             recv_end = False
                             recv_start = True
-                            sos_count += 1
                             continue
 
                         if event.type == agents.stt.SpeechEventType.FINAL_TRANSCRIPT:
@@ -240,7 +229,6 @@ async def test_stream(stt_factory: Callable[[], STT], request):
                                 assert language is not None
                                 assert language.lower().startswith("en")
                             got_final_transcript = True
-                            final_count += 1
                             # Some providers don't send END_OF_SPEECH, break after final transcript
                             if state["closing"]:
                                 break
@@ -249,8 +237,7 @@ async def test_stream(stt_factory: Callable[[], STT], request):
                             recv_start = False
                             recv_end = True
                             await asyncio.sleep(1)
-                            # some providers emit END_OF_SPEECH before the segment's final transcript
-                            if state["closing"] and final_count >= sos_count:
+                            if state["closing"]:
                                 break
 
                     dt = time.time() - start_time

@@ -6,7 +6,7 @@ from typing import Any
 
 from livekit.agents import llm
 
-from .utils import convert_mid_conversation_instructions, group_tool_calls
+from .utils import group_tool_calls
 
 
 @dataclass
@@ -15,7 +15,7 @@ class MistralFormatData:
 
 
 def to_conversations_ctx(
-    chat_ctx: llm.ChatContext, *, inject_dummy_user_message: bool = True
+    chat_ctx: llm.ChatContext,
 ) -> tuple[list[dict], MistralFormatData]:
     """Convert ChatContext to Mistral Conversations API entry format.
 
@@ -23,8 +23,6 @@ def to_conversations_ctx(
         A tuple of (entries, instructions) where instructions is the extracted
         system/developer message content (or None if absent).
     """
-    chat_ctx = convert_mid_conversation_instructions(chat_ctx)
-
     item_groups = group_tool_calls(chat_ctx)
     entries: list[dict[str, Any]] = []
     instructions: str | None = None
@@ -36,11 +34,7 @@ def to_conversations_ctx(
         if group.message:
             item = group.message
             if isinstance(item, llm.ChatMessage) and item.role in ("system", "developer"):
-                text_parts = [
-                    str(c)
-                    for c in item.content
-                    if not isinstance(c, (llm.ImageContent, llm.AudioContent))
-                ]
+                text_parts = [c for c in item.content if isinstance(c, str)]
                 instructions = "\n".join(text_parts) if text_parts else None
                 continue
 
@@ -67,9 +61,6 @@ def to_conversations_ctx(
                 }
             )
 
-    if inject_dummy_user_message and entries and entries[-1].get("role") == "assistant":
-        entries.append({"type": "message.input", "role": "user", "content": "(empty)"})
-
     return entries, MistralFormatData(instructions=instructions)
 
 
@@ -92,15 +83,12 @@ def _build_content(msg: llm.ChatMessage) -> str | list[dict[str, Any]]:
     text_content = ""
 
     for content in msg.content:
-        if isinstance(content, llm.ImageContent):
-            list_content.append(_to_image_content(content))
-        elif isinstance(content, llm.AudioContent):
-            pass
-        else:
-            # str or Instructions
+        if isinstance(content, str):
             if text_content:
                 text_content += "\n"
-            text_content += str(content)
+            text_content += content
+        elif isinstance(content, llm.ImageContent):
+            list_content.append(_to_image_content(content))
 
     if not list_content:
         return text_content

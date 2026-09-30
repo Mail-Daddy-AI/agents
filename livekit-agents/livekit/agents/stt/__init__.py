@@ -5,7 +5,6 @@ from .stt import (
     STT,
     RecognitionUsage,
     RecognizeStream,
-    SpeakerContext,
     SpeechData,
     SpeechEvent,
     SpeechEventType,
@@ -28,7 +27,6 @@ __all__ = [
     "FallbackAdapter",
     "AvailabilityChangedEvent",
     "STTError",
-    "SpeakerContext",
     "MultiSpeakerAdapter",
 ]
 

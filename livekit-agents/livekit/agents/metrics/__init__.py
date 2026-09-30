@@ -1,6 +1,5 @@
 from .base import (
     AgentMetrics,
-    EOTInferenceMetrics,
     EOUMetrics,
     InterruptionMetrics,
     LLMMetrics,
@@ -11,7 +10,6 @@ from .base import (
 )
 from .usage import (
     AgentSessionUsage,
-    EOTModelUsage,
     InterruptionModelUsage,
     LLMModelUsage,
     ModelUsage,
@@ -27,7 +25,6 @@ __all__ = [
     "AgentMetrics",
     "VADMetrics",
     "EOUMetrics",
-    "EOTInferenceMetrics",
     "STTMetrics",
     "TTSMetrics",
     "RealtimeModelMetrics",
@@ -37,7 +34,6 @@ __all__ = [
     "TTSModelUsage",
     "STTModelUsage",
     "InterruptionModelUsage",
-    "EOTModelUsage",
     "ModelUsage",
     "AgentSessionUsage",
     "ModelUsageCollector",

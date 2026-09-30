@@ -23,7 +23,6 @@ class _ProcOpts:
     initialize_process_fnc: Callable[[JobProcess], Any]
     job_entrypoint_fnc: Callable[[JobContext], Awaitable[None]]
     session_end_fnc: Callable[[JobContext], Awaitable[None]] | None
-    simulation_end_fnc: Callable[[Any], Any] | None
     initialize_timeout: float
     close_timeout: float
     session_end_timeout: float
@@ -39,7 +38,6 @@ class ThreadJobExecutor:
         initialize_process_fnc: Callable[[JobProcess], Any],
         job_entrypoint_fnc: Callable[[JobContext], Awaitable[None]],
         session_end_fnc: Callable[[JobContext], Awaitable[None]] | None,
-        simulation_end_fnc: Callable[[Any], Any] | None,
         inference_executor: InferenceExecutor | None,
         initialize_timeout: float,
         close_timeout: float,
@@ -54,7 +52,6 @@ class ThreadJobExecutor:
             initialize_process_fnc=initialize_process_fnc,
             job_entrypoint_fnc=job_entrypoint_fnc,
             session_end_fnc=session_end_fnc,
-            simulation_end_fnc=simulation_end_fnc,
             initialize_timeout=initialize_timeout,
             close_timeout=close_timeout,
             session_end_timeout=session_end_timeout,
@@ -136,7 +133,6 @@ class ThreadJobExecutor:
                     initialize_process_fnc=self._opts.initialize_process_fnc,
                     job_entrypoint_fnc=self._opts.job_entrypoint_fnc,
                     session_end_fnc=self._opts.session_end_fnc,
-                    simulation_end_fnc=self._opts.simulation_end_fnc,
                     session_end_timeout=self._opts.session_end_timeout,
                     user_arguments=self._user_args,
                     join_fnc=_on_join,
@@ -288,7 +284,6 @@ class ThreadJobExecutor:
         monitor_task = asyncio.create_task(self._monitor_task())
 
         await self._join_fut
-
         await utils.aio.cancel_and_wait(ping_task, monitor_task)
         await utils.aio.cancel_and_wait(*self._inference_tasks)
 
@@ -349,7 +344,6 @@ class ThreadJobExecutor:
         }
         if self._running_job:
             extra["job_id"] = self._running_job.job.id
-            extra["room"] = self._running_job.job.room.name
             extra["room_id"] = self._running_job.job.room.sid
 
         return extra

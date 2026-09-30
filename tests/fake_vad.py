@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-from livekit import rtc
 from livekit.agents.vad import VAD, VADCapabilities, VADEvent, VADEventType, VADStream
 
 from .fake_stt import FakeUserSpeech
@@ -27,9 +26,6 @@ class FakeVAD(VAD):
         self._fake_user_speeches = fake_user_speeches
         self._min_speech_duration = min_speech_duration
         self._min_silence_duration = min_silence_duration
-        # one clock for every stream: a handoff opens a new stream mid-run, timed against
-        # the same origin the fake STT uses
-        self._start_time: float | None = None
 
     def stream(self) -> VADStream:
         return FakeVADStream(self)
@@ -45,16 +41,8 @@ class FakeVADStream(VADStream):
         if not self._vad._fake_user_speeches:
             return
 
-        if self._vad._start_time is None:
-            # the clock starts with the first frame; the fake input pushes one burst, so a
-            # later stream must not wait for another
-            async for input_frame in self._input_ch:
-                if isinstance(input_frame, rtc.AudioFrame):
-                    break
-            else:
-                return
-            self._vad._start_time = time.perf_counter()
-        start_time = self._vad._start_time
+        await self._input_ch.recv()
+        start_time = time.perf_counter()
 
         def current_time() -> float:
             return time.perf_counter() - start_time
@@ -62,9 +50,6 @@ class FakeVADStream(VADStream):
         for fake_speech in self._vad._fake_user_speeches:
             next_start_of_speech_time = fake_speech.start_time + self._vad._min_speech_duration
             next_end_of_speech_time = fake_speech.end_time + self._vad._min_silence_duration
-
-            if current_time() >= next_end_of_speech_time:
-                continue  # already over before this stream opened
 
             if current_time() < next_start_of_speech_time:
                 await asyncio.sleep(next_start_of_speech_time - current_time())

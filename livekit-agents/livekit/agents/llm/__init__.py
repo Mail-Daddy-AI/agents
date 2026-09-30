@@ -13,19 +13,6 @@ from .chat_context import (
     ImageContent,
     MetricsReport,
 )
-from .duplex import (
-    DuplexAudioFrame,
-    DuplexCapabilities,
-    DuplexModel,
-    DuplexOutputTranscriptDelta,
-    DuplexSession,
-)
-from .duplex_adapter import (
-    AdaptiveNoiseGate,
-    AudioGate,
-    DuplexRealtimeAdapter,
-    FixedGate,
-)
 from .fallback_adapter import AvailabilityChangedEvent, FallbackAdapter
 from .llm import (
     LLM,
@@ -51,12 +38,7 @@ from .realtime import (
     RealtimeSessionReconnectedEvent,
     RemoteItemAddedEvent,
 )
-from .realtime_fallback_adapter import (
-    RealtimeAvailabilityChangedEvent,
-    RealtimeModelFallbackAdapter,
-)
 from .tool_context import (
-    DuplicateScope,
     FunctionTool,
     ProviderTool,
     RawFunctionTool,
@@ -65,7 +47,6 @@ from .tool_context import (
     ToolChoice,
     ToolContext,
     ToolError,
-    ToolFlag,
     Toolset,
     find_function_tools,
     function_tool,
@@ -97,8 +78,6 @@ __all__ = [
     "CompletionUsage",
     "FallbackAdapter",
     "AvailabilityChangedEvent",
-    "RealtimeModelFallbackAdapter",
-    "RealtimeAvailabilityChangedEvent",
     "ToolChoice",
     "Tool",
     "Toolset",
@@ -111,21 +90,10 @@ __all__ = [
     "ProviderTool",
     "ToolContext",
     "ToolError",
-    "ToolFlag",
-    "DuplicateScope",
     "StopResponse",
     "utils",
     "remote_chat_context",
     "FunctionToolCall",
-    "DuplexModel",
-    "DuplexSession",
-    "DuplexCapabilities",
-    "DuplexAudioFrame",
-    "DuplexOutputTranscriptDelta",
-    "DuplexRealtimeAdapter",
-    "AudioGate",
-    "AdaptiveNoiseGate",
-    "FixedGate",
     "RealtimeModel",
     "RealtimeError",
     "RealtimeModelError",

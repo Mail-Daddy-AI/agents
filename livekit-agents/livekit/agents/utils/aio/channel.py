@@ -133,9 +133,8 @@ class Chan(Generic[T]):
     def close(self) -> None:
         self._closed = True
         self._close_ev.set()
-        while self._puts:
-            putter = self._puts.popleft()
-            if not putter.done():
+        for putter in self._puts:
+            if not putter.cancelled():
                 putter.set_exception(ChanClosed())
 
         while len(self._gets) > self.qsize():

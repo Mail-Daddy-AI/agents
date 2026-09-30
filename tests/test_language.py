@@ -1,9 +1,5 @@
-import pytest
-
 from livekit.agents.language import LanguageCode
 from livekit.agents.stt import SpeechData
-
-pytestmark = pytest.mark.unit
 
 
 class TestSpeechDataCoercion:

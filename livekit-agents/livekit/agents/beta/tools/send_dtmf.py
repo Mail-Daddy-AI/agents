@@ -2,7 +2,6 @@ import asyncio
 
 from ... import function_tool
 from ...job import get_job_context
-from ...voice.events import RunContext
 from ..workflows.utils import DtmfEvent, dtmf_event_to_code
 
 DEFAULT_DTMF_PUBLISH_DELAY = 0.3  # seconds to wait between sending DTMF events
@@ -10,7 +9,6 @@ DEFAULT_DTMF_PUBLISH_DELAY = 0.3  # seconds to wait between sending DTMF events
 
 @function_tool
 async def send_dtmf_events(
-    ctx: RunContext,
     events: list[DtmfEvent],
 ) -> str:
     """
@@ -19,15 +17,12 @@ async def send_dtmf_events(
     Call when:
     - User wants to send DTMF events
     """
-    try:
-        room = ctx.session.room_io.room
-    except RuntimeError:
-        room = get_job_context().room
+    job_ctx = get_job_context()
 
     for event in events:
         try:
             code = dtmf_event_to_code(event)
-            await room.local_participant.publish_dtmf(code=code, digit=event.value)
+            await job_ctx.room.local_participant.publish_dtmf(code=code, digit=event.value)
             await asyncio.sleep(DEFAULT_DTMF_PUBLISH_DELAY)
         except Exception as e:
             return f"Failed to send DTMF event: {event.value}. Error: {str(e)}"
